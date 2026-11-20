@@ -8,7 +8,15 @@ import {
   requireAuth,
   verifyPassword,
 } from './auth.ts';
-import { db, getDbConnectionSummary, getDbDriver, nowSqlTimestamp } from './db.ts';
+import {
+  SCHEMA_TABLES,
+  type SchemaTableName,
+  db,
+  getDbConnectionSummary,
+  getDbDriver,
+  nowSqlTimestamp,
+  seedIfEmpty,
+} from './db.ts';
 
 export const apiRouter = Router();
 
@@ -455,6 +463,14 @@ apiRouter.post(
         Number(courseId),
         Number(subjectId),
       ]);
+      await recordLog({
+        adminId: req.authUser!.id,
+        reason: `Mapped Subject #${subjectId} to Course #${courseId}`,
+        actionType: 'ADD',
+        affectedTable: 'CourseSubject',
+        affectedRecordId: Number(courseId),
+        status: 'Approved',
+      });
       res.status(201).json({ ok: true });
     } catch {
       res.status(409).json({ error: 'This subject is already mapped to the selected course.' });
@@ -784,6 +800,15 @@ apiRouter.post(
       'INSERT INTO SectionSubject (SectionID, SubjectID, TeacherID) VALUES (?, ?, ?)',
       [Number(sectionId), Number(subjectId), assignedTeacher]
     );
+    await recordLog({
+      teacherId: user.role === 'teacher' ? user.id : assignedTeacher,
+      adminId: user.role === 'admin' ? user.id : null,
+      reason: `Assigned Subject #${subjectId} to Section #${sectionId}`,
+      actionType: 'ADD',
+      affectedTable: 'SectionSubject',
+      affectedRecordId: info.insertId,
+      status: user.role === 'admin' ? 'Approved' : 'Logged',
+    });
     res.status(201).json({ SectionSubjectID: info.insertId });
   })
 );
@@ -1442,6 +1467,16 @@ apiRouter.post(
         );
       }
     }
+    await recordLog({
+      teacherId: user.role === 'teacher' ? user.id : null,
+      adminId: user.role === 'admin' ? user.id : null,
+      reason: `Saved attendance (${records.length} students) for Subject #${subjectId} on ${date}`,
+      actionType: 'EDIT',
+      affectedTable: 'Attendance',
+      affectedRecordId: Number(sectionId),
+      status: 'Logged',
+    });
+
     res.json({ ok: true, count: records.length });
   })
 );
@@ -1651,5 +1686,509 @@ apiRouter.post(
     }
 
     res.json({ ok: true, deletedCount });
+  })
+);
+
+// ==================== ADMIN DIRECT DATABASE CONTROL ====================
+
+interface DbColumnDef {
+  name: string;
+  type: 'number' | 'string' | 'date';
+  required?: boolean;
+  auto?: boolean;
+  secret?: boolean;
+}
+
+const DB_TABLE_META: Record<
+  SchemaTableName,
+  {
+    primaryKeys: string[];
+    columns: DbColumnDef[];
+  }
+> = {
+  Course: {
+    primaryKeys: ['CourseID'],
+    columns: [
+      { name: 'CourseID', type: 'number', auto: true },
+      { name: 'CourseName', type: 'string', required: true },
+    ],
+  },
+  Subject: {
+    primaryKeys: ['SubjectID'],
+    columns: [
+      { name: 'SubjectID', type: 'number', auto: true },
+      { name: 'SubjectName', type: 'string', required: true },
+    ],
+  },
+  CourseSubject: {
+    primaryKeys: ['CourseID', 'SubjectID'],
+    columns: [
+      { name: 'CourseID', type: 'number', required: true },
+      { name: 'SubjectID', type: 'number', required: true },
+    ],
+  },
+  Teacher: {
+    primaryKeys: ['TeacherID'],
+    columns: [
+      { name: 'TeacherID', type: 'number', auto: true },
+      { name: 'Name', type: 'string', required: true },
+      { name: 'Email', type: 'string', required: true },
+      { name: 'Password', type: 'string', required: true, secret: true },
+    ],
+  },
+  Admin: {
+    primaryKeys: ['AdminID'],
+    columns: [
+      { name: 'AdminID', type: 'number', auto: true },
+      { name: 'Name', type: 'string', required: true },
+      { name: 'Email', type: 'string', required: true },
+      { name: 'Password', type: 'string', required: true, secret: true },
+    ],
+  },
+  Section: {
+    primaryKeys: ['SectionID'],
+    columns: [
+      { name: 'SectionID', type: 'number', auto: true },
+      { name: 'CourseID', type: 'number', required: true },
+      { name: 'SectionName', type: 'string', required: true },
+    ],
+  },
+  SectionSubject: {
+    primaryKeys: ['SectionSubjectID'],
+    columns: [
+      { name: 'SectionSubjectID', type: 'number', auto: true },
+      { name: 'SectionID', type: 'number', required: true },
+      { name: 'SubjectID', type: 'number', required: true },
+      { name: 'TeacherID', type: 'number', required: true },
+    ],
+  },
+  Student: {
+    primaryKeys: ['StudentID'],
+    columns: [
+      { name: 'StudentID', type: 'number', auto: true },
+      { name: 'SectionID', type: 'number', required: true },
+      { name: 'Name', type: 'string', required: true },
+      { name: 'Email', type: 'string' },
+      { name: 'Status', type: 'string' },
+    ],
+  },
+  Assessment: {
+    primaryKeys: ['AssessmentID'],
+    columns: [
+      { name: 'AssessmentID', type: 'number', auto: true },
+      { name: 'SubjectID', type: 'number', required: true },
+      { name: 'Title', type: 'string', required: true },
+      { name: 'MaxScore', type: 'number', required: true },
+      { name: 'AssessmentType', type: 'string', required: true },
+    ],
+  },
+  StudentScore: {
+    primaryKeys: ['ScoreID'],
+    columns: [
+      { name: 'ScoreID', type: 'number', auto: true },
+      { name: 'AssessmentID', type: 'number', required: true },
+      { name: 'StudentID', type: 'number', required: true },
+      { name: 'Score', type: 'number', required: true },
+      { name: 'Remarks', type: 'string' },
+    ],
+  },
+  Attendance: {
+    primaryKeys: ['AttendanceID'],
+    columns: [
+      { name: 'AttendanceID', type: 'number', auto: true },
+      { name: 'StudentID', type: 'number', required: true },
+      { name: 'SubjectID', type: 'number', required: true },
+      { name: 'Date', type: 'date', required: true },
+      { name: 'Status', type: 'string', required: true },
+    ],
+  },
+  Log: {
+    primaryKeys: ['LogID'],
+    columns: [
+      { name: 'LogID', type: 'number', auto: true },
+      { name: 'TeacherID', type: 'number' },
+      { name: 'AdminID', type: 'number' },
+      { name: 'Reason', type: 'string', required: true },
+      { name: 'ActionType', type: 'string', required: true },
+      { name: 'AffectedTable', type: 'string', required: true },
+      { name: 'AffectedRecordID', type: 'number', required: true },
+      { name: 'Timestamp', type: 'string' },
+      { name: 'Status', type: 'string' },
+    ],
+  },
+};
+
+function resolveSchemaTable(name: string): SchemaTableName | null {
+  return (SCHEMA_TABLES as readonly string[]).includes(name) ? (name as SchemaTableName) : null;
+}
+
+function maskSecretColumns(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return rows.map((row) => {
+    if (!('Password' in row)) return row;
+    return { ...row, Password: '••••••••' };
+  });
+}
+
+function coerceDbValue(col: DbColumnDef, raw: unknown): unknown {
+  if (raw === undefined || raw === null || raw === '') {
+    return null;
+  }
+  if (col.type === 'number') {
+    const num = Number(raw);
+    return Number.isNaN(num) ? null : num;
+  }
+  return String(raw);
+}
+
+apiRouter.get(
+  '/admin/db/overview',
+  requireAdmin,
+  asyncRoute(async (_req, res) => {
+    const tables: Array<{
+      name: SchemaTableName;
+      rowCount: number;
+      primaryKeys: string[];
+      columns: DbColumnDef[];
+    }> = [];
+
+    for (const tableName of SCHEMA_TABLES) {
+      const row = await db.queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${tableName}`);
+      tables.push({
+        name: tableName,
+        rowCount: Number(row?.c ?? 0),
+        primaryKeys: DB_TABLE_META[tableName].primaryKeys,
+        columns: DB_TABLE_META[tableName].columns,
+      });
+    }
+
+    const recentChanges = await db.query(
+      `SELECT l.*, t.Name AS TeacherName, a.Name AS AdminName
+       FROM Log l
+       LEFT JOIN Teacher t ON t.TeacherID = l.TeacherID
+       LEFT JOIN Admin a ON a.AdminID = l.AdminID
+       ORDER BY l.LogID DESC
+       LIMIT 25`
+    );
+
+    res.json({
+      driver: getDbDriver(),
+      target: getDbConnectionSummary(),
+      tables,
+      recentChanges,
+    });
+  })
+);
+
+apiRouter.get(
+  '/admin/db/table/:tableName',
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const table = resolveSchemaTable(req.params.tableName);
+    if (!table) {
+      res.status(404).json({ error: 'Unknown schema table.' });
+      return;
+    }
+    const meta = DB_TABLE_META[table];
+    const orderCol = meta.primaryKeys[0];
+    const rows = await db.query<Record<string, unknown>>(
+      `SELECT * FROM ${table} ORDER BY ${orderCol} DESC LIMIT 200`
+    );
+    res.json({
+      table,
+      primaryKeys: meta.primaryKeys,
+      columns: meta.columns,
+      rows: maskSecretColumns(rows),
+    });
+  })
+);
+
+apiRouter.post(
+  '/admin/db/table/:tableName/row',
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const admin = req.authUser!;
+    const table = resolveSchemaTable(req.params.tableName);
+    if (!table) {
+      res.status(404).json({ error: 'Unknown schema table.' });
+      return;
+    }
+    const meta = DB_TABLE_META[table];
+    const body = (req.body || {}) as Record<string, unknown>;
+
+    const insertCols: string[] = [];
+    const insertVals: unknown[] = [];
+
+    for (const col of meta.columns) {
+      if (col.auto) continue;
+      let val = coerceDbValue(col, body[col.name]);
+      if (col.required && (val === null || val === '')) {
+        res.status(400).json({ error: `Column ${col.name} is required.` });
+        return;
+      }
+      if (col.secret && typeof val === 'string') {
+        val = hashPassword(val);
+      }
+      if (val !== null || col.required) {
+        insertCols.push(col.name);
+        insertVals.push(val);
+      }
+    }
+
+    if (insertCols.length === 0) {
+      res.status(400).json({ error: 'At least one column value is required.' });
+      return;
+    }
+
+    const placeholders = insertCols.map(() => '?').join(', ');
+    const info = await db.execute(
+      `INSERT INTO ${table} (${insertCols.join(', ')}) VALUES (${placeholders})`,
+      insertVals
+    );
+
+    const recordId = info.insertId || Number(body[meta.primaryKeys[0]] || 0);
+    await recordLog({
+      adminId: admin.id,
+      reason: `Direct DB insert into ${table}`,
+      actionType: 'ADD',
+      affectedTable: table,
+      affectedRecordId: recordId,
+      status: 'Approved',
+    });
+
+    res.status(201).json({ ok: true, insertId: recordId });
+  })
+);
+
+apiRouter.put(
+  '/admin/db/table/:tableName/row',
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const admin = req.authUser!;
+    const table = resolveSchemaTable(req.params.tableName);
+    if (!table) {
+      res.status(404).json({ error: 'Unknown schema table.' });
+      return;
+    }
+    const meta = DB_TABLE_META[table];
+    const body = (req.body || {}) as Record<string, unknown>;
+
+    const whereClauses: string[] = [];
+    const whereVals: unknown[] = [];
+    for (const pk of meta.primaryKeys) {
+      if (body[pk] === undefined || body[pk] === null || body[pk] === '') {
+        res.status(400).json({ error: `Primary key ${pk} is required.` });
+        return;
+      }
+      whereClauses.push(`${pk} = ?`);
+      whereVals.push(Number(body[pk]));
+    }
+
+    const setClauses: string[] = [];
+    const setVals: unknown[] = [];
+    for (const col of meta.columns) {
+      if (meta.primaryKeys.includes(col.name)) continue;
+      if (!(col.name in body)) continue;
+      const raw = body[col.name];
+      if (col.secret && (raw === '••••••••' || raw === '' || raw === null)) {
+        continue;
+      }
+      let val = coerceDbValue(col, raw);
+      if (col.secret && typeof val === 'string') {
+        val = hashPassword(val);
+      }
+      setClauses.push(`${col.name} = ?`);
+      setVals.push(val);
+    }
+
+    if (setClauses.length === 0) {
+      res.status(400).json({ error: 'No updatable columns provided.' });
+      return;
+    }
+
+    const result = await db.execute(
+      `UPDATE ${table} SET ${setClauses.join(', ')} WHERE ${whereClauses.join(' AND ')}`,
+      [...setVals, ...whereVals]
+    );
+
+    await recordLog({
+      adminId: admin.id,
+      reason: `Direct DB update on ${table}`,
+      actionType: 'EDIT',
+      affectedTable: table,
+      affectedRecordId: Number(whereVals[0] || 0),
+      status: 'Approved',
+    });
+
+    res.json({ ok: true, affectedRows: result.affectedRows });
+  })
+);
+
+apiRouter.delete(
+  '/admin/db/table/:tableName/row',
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const admin = req.authUser!;
+    const table = resolveSchemaTable(req.params.tableName);
+    if (!table) {
+      res.status(404).json({ error: 'Unknown schema table.' });
+      return;
+    }
+    const meta = DB_TABLE_META[table];
+    const body = (req.body || {}) as Record<string, unknown>;
+
+    const whereClauses: string[] = [];
+    const whereVals: unknown[] = [];
+    for (const pk of meta.primaryKeys) {
+      if (body[pk] === undefined || body[pk] === null || body[pk] === '') {
+        res.status(400).json({ error: `Primary key ${pk} is required.` });
+        return;
+      }
+      whereClauses.push(`${pk} = ?`);
+      whereVals.push(Number(body[pk]));
+    }
+
+    const result = await db.execute(
+      `DELETE FROM ${table} WHERE ${whereClauses.join(' AND ')}`,
+      whereVals
+    );
+
+    if (table !== 'Log') {
+      await recordLog({
+        adminId: admin.id,
+        reason: `Direct DB delete from ${table}`,
+        actionType: 'DELETE',
+        affectedTable: table,
+        affectedRecordId: Number(whereVals[0] || 0),
+        status: 'Approved',
+      });
+    }
+
+    res.json({ ok: true, affectedRows: result.affectedRows });
+  })
+);
+
+apiRouter.post(
+  '/admin/db/query',
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const admin = req.authUser!;
+    const { sql } = req.body as { sql?: string };
+    const trimmed = (sql || '').trim().replace(/;+\s*$/, '');
+    if (!trimmed) {
+      res.status(400).json({ error: 'SQL statement cannot be empty.' });
+      return;
+    }
+    if (trimmed.includes(';')) {
+      res.status(400).json({ error: 'Only one SQL statement can be executed at a time.' });
+      return;
+    }
+
+    const firstWord = trimmed.split(/\s+/)[0].toUpperCase();
+    const isReadQuery = ['SELECT', 'SHOW', 'DESCRIBE', 'DESC', 'EXPLAIN', 'PRAGMA'].includes(
+      firstWord
+    );
+
+    if (isReadQuery) {
+      const rawRows = await db.query<Record<string, unknown>>(trimmed);
+      const rows = maskSecretColumns(rawRows);
+      const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+      res.json({ kind: 'rows', columns, rows, rowCount: rows.length });
+      return;
+    }
+
+    const result = await db.execute(trimmed);
+    const actionType: 'ADD' | 'EDIT' | 'DELETE' | 'CLEANUP' =
+      firstWord === 'INSERT'
+        ? 'ADD'
+        : firstWord === 'DELETE'
+        ? 'DELETE'
+        : firstWord === 'TRUNCATE' || firstWord === 'DROP'
+        ? 'CLEANUP'
+        : 'EDIT';
+
+    await recordLog({
+      adminId: admin.id,
+      reason: `Direct SQL (${firstWord}): ${trimmed.slice(0, 200)}`,
+      actionType,
+      affectedTable: 'DirectSQL',
+      affectedRecordId: result.insertId || 0,
+      status: 'Approved',
+    });
+
+    res.json({
+      kind: 'mutation',
+      affectedRows: result.affectedRows,
+      insertId: result.insertId,
+    });
+  })
+);
+
+apiRouter.post(
+  '/admin/db/clear',
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const admin = req.authUser!;
+    const { mode } = req.body as { mode?: 'academic' | 'reseed' };
+    const clearMode = mode === 'reseed' ? 'reseed' : 'academic';
+
+    // Reverse topological order to respect all foreign key constraints without needing FK disable
+    const tablesToClear: SchemaTableName[] = [
+      'Log',
+      'Attendance',
+      'StudentScore',
+      'Assessment',
+      'Student',
+      'SectionSubject',
+      'Section',
+      'CourseSubject',
+      'Subject',
+      'Course',
+      'Teacher',
+    ];
+
+    for (const tbl of tablesToClear) {
+      await db.execute(`DELETE FROM ${tbl}`);
+    }
+
+    if (clearMode === 'reseed') {
+      // Preserve current Admin session row if ID != 1 or clear & reseed cleanly
+      if (getDbDriver() === 'sqlite') {
+        await db.execute("DELETE FROM sqlite_sequence WHERE name != 'Admin'");
+      } else {
+        for (const tbl of tablesToClear) {
+          await db.execute(`ALTER TABLE ${tbl} AUTO_INCREMENT = 1`);
+        }
+      }
+      await seedIfEmpty();
+      await recordLog({
+        adminId: admin.id,
+        reason: 'Reset academic data & re-seeded sample dataset',
+        actionType: 'CLEANUP',
+        affectedTable: 'Database',
+        affectedRecordId: 0,
+        status: 'Logged',
+      });
+      res.json({ ok: true, mode: 'reseed' });
+      return;
+    }
+
+    if (getDbDriver() === 'sqlite') {
+      await db.execute("DELETE FROM sqlite_sequence WHERE name != 'Admin'");
+    } else {
+      for (const tbl of tablesToClear) {
+        await db.execute(`ALTER TABLE ${tbl} AUTO_INCREMENT = 1`);
+      }
+    }
+
+    await recordLog({
+      adminId: admin.id,
+      reason: 'Cleared all academic & faculty data (Admin accounts preserved)',
+      actionType: 'CLEANUP',
+      affectedTable: 'Database',
+      affectedRecordId: 0,
+      status: 'Logged',
+    });
+
+    res.json({ ok: true, mode: 'academic' });
   })
 );

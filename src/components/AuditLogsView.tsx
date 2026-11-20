@@ -216,13 +216,18 @@ export function AuditLogsView({
             <option value="all">All Records</option>
             <option value="Student">Student</option>
             <option value="Section">Section</option>
+            <option value="SectionSubject">SectionSubject</option>
             <option value="Assessment">Assessment</option>
             <option value="StudentScore">StudentScore</option>
+            <option value="Attendance">Attendance</option>
             <option value="Course">Course</option>
             <option value="Subject">Subject</option>
+            <option value="CourseSubject">CourseSubject</option>
             <option value="Teacher">Teacher</option>
             <option value="Admin">Admin</option>
             <option value="Log">Log</option>
+            <option value="DirectSQL">DirectSQL</option>
+            <option value="Database">Database</option>
           </select>
         </div>
 

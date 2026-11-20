@@ -39,13 +39,40 @@ export function getDbDriver(): DbDriver {
   return 'sqlite';
 }
 
+export const SCHEMA_TABLES = [
+  'Course',
+  'Subject',
+  'CourseSubject',
+  'Teacher',
+  'Admin',
+  'Section',
+  'SectionSubject',
+  'Student',
+  'Assessment',
+  'StudentScore',
+  'Attendance',
+  'Log',
+] as const;
+
+export type SchemaTableName = (typeof SCHEMA_TABLES)[number];
+
+function resolveMysqlDatabase(pathName?: string): string {
+  const envDb = process.env.MYSQL_DATABASE?.trim();
+  if (envDb) return envDb;
+  const cleaned = (pathName || '').replace(/^\//, '').trim();
+  if (cleaned && cleaned.toLowerCase() !== 'defaultdb') {
+    return cleaned;
+  }
+  return 'sms';
+}
+
 export function getDbConnectionSummary(): string {
   if (getDbDriver() === 'mysql') {
     const uri = getMysqlUri();
     if (uri) {
       try {
         const parsed = new URL(uri);
-        const dbName = parsed.pathname.replace(/^\//, '') || 'defaultdb';
+        const dbName = resolveMysqlDatabase(parsed.pathname);
         const port = parsed.port || '3306';
         return `MySQL (${parsed.hostname}:${port}/${dbName})`;
       } catch {
@@ -54,7 +81,7 @@ export function getDbConnectionSummary(): string {
     }
     const host = process.env.MYSQL_HOST?.trim() || 'localhost';
     const port = process.env.MYSQL_PORT || '3306';
-    const dbName = process.env.MYSQL_DATABASE?.trim() || 'defaultdb';
+    const dbName = resolveMysqlDatabase();
     return `MySQL (${host}:${port}/${dbName})`;
   }
   return `SQLite fallback (${path.join('data', 'sms.db')})`;
@@ -109,7 +136,7 @@ async function getMysqlPool(): Promise<Pool> {
       port: Number(parsed.port || 3306),
       user: decodeURIComponent(parsed.username),
       password: decodeURIComponent(parsed.password),
-      database: parsed.pathname.replace(/^\//, '') || 'defaultdb',
+      database: resolveMysqlDatabase(parsed.pathname),
       ssl: resolveSslConfig(sslMode),
       waitForConnections: true,
       connectionLimit: 5,
@@ -124,7 +151,7 @@ async function getMysqlPool(): Promise<Pool> {
       port: Number(process.env.MYSQL_PORT || 3306),
       user: process.env.MYSQL_USER?.trim() || 'avnadmin',
       password: process.env.MYSQL_PASSWORD || '',
-      database: process.env.MYSQL_DATABASE?.trim() || 'defaultdb',
+      database: resolveMysqlDatabase(),
       ssl: resolveSslConfig('REQUIRED'),
       waitForConnections: true,
       connectionLimit: 5,
@@ -432,7 +459,7 @@ export async function initDatabase(): Promise<void> {
   return globalThis.__smsInitPromise;
 }
 
-async function seedIfEmpty(): Promise<void> {
+export async function seedIfEmpty(): Promise<void> {
   const courseCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Course');
   if ((courseCount?.c ?? 0) > 0) return;
 
@@ -506,12 +533,15 @@ async function seedIfEmpty(): Promise<void> {
     ['Ivan Moreno', 'ivan.moreno@sample.ph'],
     ['Janine Soriano', 'janine.soriano@sample.ph'],
   ];
-  for (const [name, email] of admins) {
-    await db.execute('INSERT INTO Admin (Name, Email, Password) VALUES (?, ?, ?)', [
-      name,
-      email,
-      defaultAdminHash,
-    ]);
+  const adminCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Admin');
+  if ((adminCount?.c ?? 0) === 0) {
+    for (const [name, email] of admins) {
+      await db.execute('INSERT INTO Admin (Name, Email, Password) VALUES (?, ?, ?)', [
+        name,
+        email,
+        defaultAdminHash,
+      ]);
+    }
   }
 
   const sections: Array<[number, string]> = [

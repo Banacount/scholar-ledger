@@ -156,3 +156,46 @@ export interface MaintenanceStatus {
   maxThreshold: number;
   needsMaintenance: boolean;
 }
+
+export interface DbColumnDef {
+  name: string;
+  type: 'number' | 'string' | 'date';
+  required?: boolean;
+  auto?: boolean;
+  secret?: boolean;
+}
+
+export interface DbTableSummary {
+  name: string;
+  rowCount: number;
+  primaryKeys: string[];
+  columns: DbColumnDef[];
+}
+
+export interface DbOverviewResponse {
+  driver: 'mysql' | 'sqlite';
+  target: string;
+  tables: DbTableSummary[];
+  recentChanges: AuditLog[];
+}
+
+export interface DbTableRowsResponse {
+  table: string;
+  primaryKeys: string[];
+  columns: DbColumnDef[];
+  rows: Array<Record<string, unknown>>;
+}
+
+export type DbQueryResponse =
+  | {
+      kind: 'rows';
+      columns: string[];
+      rows: Array<Record<string, unknown>>;
+      rowCount: number;
+    }
+  | {
+      kind: 'mutation';
+      affectedRows: number;
+      insertId: number;
+    };
+

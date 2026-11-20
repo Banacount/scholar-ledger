@@ -3,6 +3,7 @@ import {
   BookOpen,
   BookOpenCheck,
   ClipboardCheck,
+  Database,
   GraduationCap,
   Layers,
   LayoutDashboard,
@@ -14,6 +15,7 @@ import {
 import { AuditLogsView } from './components/AuditLogsView.tsx';
 import { AuthScreen } from './components/AuthScreen.tsx';
 import { CatalogDirectoryView } from './components/CatalogDirectoryView.tsx';
+import { DatabaseControlView } from './components/DatabaseControlView.tsx';
 import { GradebookView } from './components/GradebookView.tsx';
 import { OverviewView } from './components/OverviewView.tsx';
 import { SectionsView } from './components/SectionsView.tsx';
@@ -22,7 +24,15 @@ import { apiRequest, getStoredToken, setStoredToken } from './lib/api.ts';
 import { useAppRouter } from './lib/router.ts';
 import type { AuthUser, DashboardSummary } from './types.ts';
 
-type ActiveTab = 'overview' | 'sections' | 'students' | 'gradebook' | 'logs' | 'catalog' | 'not-found';
+type ActiveTab =
+  | 'overview'
+  | 'sections'
+  | 'students'
+  | 'gradebook'
+  | 'logs'
+  | 'catalog'
+  | 'database'
+  | 'not-found';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   overview: 'Overview',
@@ -31,6 +41,7 @@ const TAB_LABELS: Record<ActiveTab, string> = {
   gradebook: 'Gradebook',
   logs: 'Audit & Review',
   catalog: 'Catalog & Faculty',
+  database: 'Database Control',
   'not-found': 'Page Not Found',
 };
 
@@ -134,6 +145,15 @@ function resolveRoute(
   if (clean === '/catalog') {
     return {
       tab: isAdmin ? 'catalog' : 'overview',
+      gradebookSubTab: 'scores',
+      sectionId: null,
+      studentId: null,
+      logStatus: undefined,
+    };
+  }
+  if (clean === '/database') {
+    return {
+      tab: isAdmin ? 'database' : 'overview',
       gradebookSubTab: 'scores',
       sectionId: null,
       studentId: null,
@@ -262,6 +282,9 @@ export default function App() {
       case 'catalog':
         navigate('/catalog');
         break;
+      case 'database':
+        navigate('/database');
+        break;
       default:
         navigate('/overview');
     }
@@ -286,7 +309,10 @@ export default function App() {
       count: pendingCount > 0 ? pendingCount : undefined,
     },
     ...(isAdmin
-      ? [{ id: 'catalog' as ActiveTab, path: '/catalog', label: 'Catalog & Faculty', icon: BookOpen }]
+      ? [
+          { id: 'catalog' as ActiveTab, path: '/catalog', label: 'Catalog & Faculty', icon: BookOpen },
+          { id: 'database' as ActiveTab, path: '/database', label: 'Database Control', icon: Database },
+        ]
       : []),
   ];
 
@@ -491,6 +517,10 @@ export default function App() {
           )}
 
           {activeTab === 'catalog' && isAdmin && <CatalogDirectoryView />}
+
+          {activeTab === 'database' && isAdmin && (
+            <DatabaseControlView onDataChanged={loadDashboard} />
+          )}
 
           {activeTab === 'not-found' && (
             <div className="rounded-xl border border-slate-200 bg-white px-6 py-14 text-center">
