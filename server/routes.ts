@@ -8,7 +8,7 @@ import {
   requireAuth,
   verifyPassword,
 } from './auth.ts';
-import { db, getDbDriver, nowSqlTimestamp } from './db.ts';
+import { db, getDbConnectionSummary, getDbDriver, nowSqlTimestamp } from './db.ts';
 
 export const apiRouter = Router();
 
@@ -80,7 +80,7 @@ apiRouter.get(
   '/health',
   asyncRoute(async (_req, res) => {
     await db.queryOne('SELECT 1 as ok');
-    res.json({ ok: true, database: getDbDriver() });
+    res.json({ ok: true, database: getDbDriver(), target: getDbConnectionSummary() });
   })
 );
 

@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { createApiApp } from './server/app.ts';
-import { getDbDriver, initDatabase } from './server/db.ts';
+import { getDbConnectionSummary, initDatabase } from './server/db.ts';
 
 async function startServer() {
   await initDatabase();
@@ -25,7 +25,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`ScholarLedger SMS running on http://0.0.0.0:${PORT} (db: ${getDbDriver()})`);
+    console.log(`ScholarLedger SMS running on http://0.0.0.0:${PORT} (${getDbConnectionSummary()})`);
   });
 }
 

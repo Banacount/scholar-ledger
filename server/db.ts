@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Pool, PoolOptions, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
@@ -36,6 +37,27 @@ export function getDbDriver(): DbDriver {
     return 'mysql';
   }
   return 'sqlite';
+}
+
+export function getDbConnectionSummary(): string {
+  if (getDbDriver() === 'mysql') {
+    const uri = getMysqlUri();
+    if (uri) {
+      try {
+        const parsed = new URL(uri);
+        const dbName = parsed.pathname.replace(/^\//, '') || 'defaultdb';
+        const port = parsed.port || '3306';
+        return `MySQL (${parsed.hostname}:${port}/${dbName})`;
+      } catch {
+        return 'MySQL (configured via URI)';
+      }
+    }
+    const host = process.env.MYSQL_HOST?.trim() || 'localhost';
+    const port = process.env.MYSQL_PORT || '3306';
+    const dbName = process.env.MYSQL_DATABASE?.trim() || 'defaultdb';
+    return `MySQL (${host}:${port}/${dbName})`;
+  }
+  return `SQLite fallback (${path.join('data', 'sms.db')})`;
 }
 
 export function nowSqlTimestamp(): string {
@@ -380,13 +402,26 @@ export async function initDatabase(): Promise<void> {
   }
 
   globalThis.__smsInitPromise = (async () => {
-    if (getDbDriver() === 'mysql') {
-      for (const stmt of MYSQL_SCHEMA_STATEMENTS) {
-        await db.execute(stmt);
+    const driver = getDbDriver();
+    if (driver === 'mysql') {
+      const summary = getDbConnectionSummary();
+      console.log(`[DB] Connecting to ${summary}...`);
+      try {
+        for (const stmt of MYSQL_SCHEMA_STATEMENTS) {
+          await db.execute(stmt);
+        }
+        console.log(`[DB] Connected and verified schema on ${summary}.`);
+      } catch (err) {
+        console.error(`[DB] Failed to initialize ${summary}:`, err);
+        throw err;
       }
     } else {
+      console.warn(
+        `[DB] No SERVICE_URI configured — using local ${getDbConnectionSummary()}.`
+      );
       const sqlite = await getSqliteDb();
       sqlite.exec(SQLITE_SCHEMA_SQL);
+      console.log(`[DB] Initialized local SQLite fallback database at ${path.resolve(process.cwd(), 'data', 'sms.db')}.`);
     }
     await seedIfEmpty();
   })().catch((err) => {
