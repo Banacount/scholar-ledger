@@ -1,0 +1,6 @@
+{
+  "name": "ScholarLedger — Student Management System",
+  "description": "Relational academic records, section & gradebook management, and accountable administrative audit oversight for teachers and administrators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
