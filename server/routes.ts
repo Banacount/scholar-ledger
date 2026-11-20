@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from 'express';
 import {
   type AuthenticatedRequest,
   createToken,
+  extractAuthUser,
   hashPassword,
   requireAdmin,
   requireAuth,
@@ -2125,11 +2126,36 @@ apiRouter.post(
 
 apiRouter.post(
   '/admin/db/clear',
-  requireAdmin,
   asyncRoute(async (req, res) => {
-    const admin = req.authUser!;
-    const { mode } = req.body as { mode?: 'academic' | 'reseed' };
+    const caller = extractAuthUser(req);
+    const setupSecret = process.env.SESSION_SECRET?.trim();
+    const headerSecret = typeof req.headers['x-setup-secret'] === 'string'
+      ? req.headers['x-setup-secret'].trim()
+      : '';
+    const hasSetupSecret = Boolean(setupSecret && headerSecret && headerSecret === setupSecret);
+    const adminCountRow = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Admin');
+    const hasNoAdmins = Number(adminCountRow?.c ?? 0) === 0;
+
+    if (caller?.role === 'teacher' && !hasSetupSecret && !hasNoAdmins) {
+      res.status(403).json({ error: 'Administrator access required.' });
+      return;
+    }
+    if (caller?.role !== 'admin' && !hasSetupSecret && !hasNoAdmins) {
+      res.status(401).json({
+        error:
+          'Authentication required. Provide an Admin Bearer token or x-setup-secret matching SESSION_SECRET.',
+      });
+      return;
+    }
+
+    const { mode, includeAdmins } = (req.body || {}) as {
+      mode?: 'academic' | 'reseed';
+      includeAdmins?: boolean;
+    };
     const clearMode = mode === 'reseed' ? 'reseed' : 'academic';
+    // Clear Admin table too when bootstrapping via setup secret / zero admins, or when explicitly requested
+    const clearAdmins =
+      Boolean(includeAdmins) || (clearMode === 'reseed' && (hasSetupSecret || hasNoAdmins));
 
     // Reverse topological order to respect all foreign key constraints without needing FK disable
     const tablesToClear: SchemaTableName[] = [
@@ -2144,45 +2170,54 @@ apiRouter.post(
       'Subject',
       'Course',
       'Teacher',
+      ...(clearAdmins ? (['Admin'] as SchemaTableName[]) : []),
     ];
 
     for (const tbl of tablesToClear) {
       await db.execute(`DELETE FROM ${tbl}`);
     }
 
-    if (clearMode === 'reseed') {
-      // Preserve current Admin session row if ID != 1 or clear & reseed cleanly
-      if (getDbDriver() === 'sqlite') {
-        await db.execute("DELETE FROM sqlite_sequence WHERE name != 'Admin'");
-      } else {
-        for (const tbl of tablesToClear) {
-          await db.execute(`ALTER TABLE ${tbl} AUTO_INCREMENT = 1`);
-        }
-      }
-      await seedIfEmpty();
-      await recordLog({
-        adminId: admin.id,
-        reason: 'Reset academic data & re-seeded sample dataset',
-        actionType: 'CLEANUP',
-        affectedTable: 'Database',
-        affectedRecordId: 0,
-        status: 'Logged',
-      });
-      res.json({ ok: true, mode: 'reseed' });
-      return;
-    }
-
     if (getDbDriver() === 'sqlite') {
-      await db.execute("DELETE FROM sqlite_sequence WHERE name != 'Admin'");
+      if (clearAdmins) {
+        await db.execute('DELETE FROM sqlite_sequence');
+      } else {
+        await db.execute("DELETE FROM sqlite_sequence WHERE name != 'Admin'");
+      }
     } else {
       for (const tbl of tablesToClear) {
         await db.execute(`ALTER TABLE ${tbl} AUTO_INCREMENT = 1`);
       }
     }
 
+    if (clearMode === 'reseed') {
+      await seedIfEmpty();
+      const firstAdmin = await db.queryOne<{ AdminID: number }>(
+        'SELECT AdminID FROM Admin ORDER BY AdminID ASC LIMIT 1'
+      );
+      await recordLog({
+        adminId: caller?.role === 'admin' && !clearAdmins ? caller.id : firstAdmin?.AdminID ?? null,
+        reason: 'Reset database & re-seeded default dataset',
+        actionType: 'CLEANUP',
+        affectedTable: 'Database',
+        affectedRecordId: 0,
+        status: 'Logged',
+      });
+      res.json({
+        ok: true,
+        mode: 'reseed',
+        seededAccounts: {
+          admin: 'rafael.lim@sample.ph / admin123',
+          teacher: 'maria.reyes@sample.ph / teacher123',
+        },
+      });
+      return;
+    }
+
     await recordLog({
-      adminId: admin.id,
-      reason: 'Cleared all academic & faculty data (Admin accounts preserved)',
+      adminId: caller?.role === 'admin' && !clearAdmins ? caller.id : null,
+      reason: clearAdmins
+        ? 'Cleared all database tables including Admin accounts'
+        : 'Cleared all academic & faculty data (Admin accounts preserved)',
       actionType: 'CLEANUP',
       affectedTable: 'Database',
       affectedRecordId: 0,

@@ -460,11 +460,36 @@ export async function initDatabase(): Promise<void> {
 }
 
 export async function seedIfEmpty(): Promise<void> {
-  const courseCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Course');
-  if ((courseCount?.c ?? 0) > 0) return;
-
   const defaultTeacherHash = hashPassword('teacher123');
   const defaultAdminHash = hashPassword('admin123');
+
+  const admins: Array<[string, string]> = [
+    ['Rafael Lim', 'rafael.lim@sample.ph'],
+    ['Sheila Ortega', 'sheila.ortega@sample.ph'],
+    ['Ben Aquino', 'ben.aquino@sample.ph'],
+    ['Diana Policarpio', 'diana.policarpio@sample.ph'],
+    ['Ernesto Magsaysay', 'ernesto.magsaysay@sample.ph'],
+    ['Felicia Zamora', 'felicia.zamora@sample.ph'],
+    ['Gerald Tan', 'gerald.tan@sample.ph'],
+    ['Hannah Lacson', 'hannah.lacson@sample.ph'],
+    ['Ivan Moreno', 'ivan.moreno@sample.ph'],
+    ['Janine Soriano', 'janine.soriano@sample.ph'],
+  ];
+
+  const courseCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Course');
+  if ((courseCount?.c ?? 0) > 0) {
+    const adminCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Admin');
+    if ((adminCount?.c ?? 0) === 0) {
+      for (const [name, email] of admins) {
+        await db.execute('INSERT INTO Admin (Name, Email, Password) VALUES (?, ?, ?)', [
+          name,
+          email,
+          defaultAdminHash,
+        ]);
+      }
+    }
+    return;
+  }
 
   const courses = ['BSIT', 'BSCS', 'BSIS', 'BSEMC', 'BSCpE', 'BSECE', 'BSEE', 'BSCE', 'BSArch', 'BSTM'];
   for (const name of courses) {
@@ -521,18 +546,6 @@ export async function seedIfEmpty(): Promise<void> {
     ]);
   }
 
-  const admins: Array<[string, string]> = [
-    ['Rafael Lim', 'rafael.lim@sample.ph'],
-    ['Sheila Ortega', 'sheila.ortega@sample.ph'],
-    ['Ben Aquino', 'ben.aquino@sample.ph'],
-    ['Diana Policarpio', 'diana.policarpio@sample.ph'],
-    ['Ernesto Magsaysay', 'ernesto.magsaysay@sample.ph'],
-    ['Felicia Zamora', 'felicia.zamora@sample.ph'],
-    ['Gerald Tan', 'gerald.tan@sample.ph'],
-    ['Hannah Lacson', 'hannah.lacson@sample.ph'],
-    ['Ivan Moreno', 'ivan.moreno@sample.ph'],
-    ['Janine Soriano', 'janine.soriano@sample.ph'],
-  ];
   const adminCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Admin');
   if ((adminCount?.c ?? 0) === 0) {
     for (const [name, email] of admins) {
