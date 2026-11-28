@@ -299,3 +299,4 @@ All table and column names use exact PascalCase matching the MySQL schema:
 ### Members 
 * Bryle Jay M. Palitoc
 * Grefin Gregg C. Taguran
+* Lavern Kate A. Abejuela
