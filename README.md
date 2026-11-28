@@ -295,3 +295,6 @@ All table and column names use exact PascalCase matching the MySQL schema:
 | `GET/POST /api/logs/maintenance` | Admin | Configure threshold & prune non-pending logs |
 | `GET/POST/PUT/DELETE /api/admin/db/*` | Admin | Table overview, row CRUD, single-statement SQL console |
 | `POST /api/admin/db/clear` | Admin / Setup Secret | Clear academic tables or reset & re-seed defaults |
+
+### Members 
+* Bryle Jay M. Palitoc
