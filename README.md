@@ -61,6 +61,7 @@ Designed to run locally out of the box with **SQLite fallback**, connect seamles
 │   └── routes.ts                # REST API endpoints & Admin DB control
 ├── src/
 │   ├── components/
+│   │   └── StatusText.tsx       # Reusable status display component
 │   │   ├── AuthScreen.tsx       # Sign-in, teacher registration & demo login buttons
 │   │   ├── OverviewView.tsx     # Dashboard KPIs, section summaries & recent logs
 │   │   ├── SectionsView.tsx     # Section & subject-teacher management
