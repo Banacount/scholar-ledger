@@ -459,6 +459,23 @@ export async function initDatabase(): Promise<void> {
   return globalThis.__smsInitPromise;
 }
 
+async function seedDefaultAdmins(
+  admins: Array<[string, string]>,
+  passwordHash: string
+): Promise<void> {
+  const adminCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Admin');
+  if ((adminCount?.c ?? 0) > 0) {
+    return;
+  }
+  for (const [name, email] of admins) {
+    await db.execute('INSERT INTO Admin (Name, Email, Password) VALUES (?, ?, ?)', [
+      name,
+      email,
+      passwordHash,
+    ]);
+  }
+}
+
 export async function seedIfEmpty(): Promise<void> {
   const defaultTeacherHash = hashPassword('teacher123');
   const defaultAdminHash = hashPassword('admin123');
@@ -478,16 +495,7 @@ export async function seedIfEmpty(): Promise<void> {
 
   const courseCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Course');
   if ((courseCount?.c ?? 0) > 0) {
-    const adminCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Admin');
-    if ((adminCount?.c ?? 0) === 0) {
-      for (const [name, email] of admins) {
-        await db.execute('INSERT INTO Admin (Name, Email, Password) VALUES (?, ?, ?)', [
-          name,
-          email,
-          defaultAdminHash,
-        ]);
-      }
-    }
+    await seedDefaultAdmins(admins, defaultAdminHash);
     return;
   }
 
@@ -546,16 +554,7 @@ export async function seedIfEmpty(): Promise<void> {
     ]);
   }
 
-  const adminCount = await db.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM Admin');
-  if ((adminCount?.c ?? 0) === 0) {
-    for (const [name, email] of admins) {
-      await db.execute('INSERT INTO Admin (Name, Email, Password) VALUES (?, ?, ?)', [
-        name,
-        email,
-        defaultAdminHash,
-      ]);
-    }
-  }
+  await seedDefaultAdmins(admins, defaultAdminHash);
 
   const sections: Array<[number, string]> = [
     [1, 'IT2R2'],
